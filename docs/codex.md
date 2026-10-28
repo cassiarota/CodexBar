@@ -403,6 +403,13 @@ unavailable (`costUSD: null`). This opt-in CLI mode does not change ordinary cos
     - `~/.codex/sessions/YYYY/MM/DD/*.jsonl`
     - `~/.codex/archived_sessions/*.jsonl` (flat; date inferred from filename when present)
     - Or `$CODEX_HOME/sessions/...` + `$CODEX_HOME/archived_sessions/...` if `CODEX_HOME` is set.
+    - Zstandard-compressed `*.jsonl.zst` rollouts are read when the `zstd` executable is available on `PATH`
+      or in the standard Homebrew locations (`brew install zstd` on macOS; the `zstd` package on Linux).
+      Decoded files stay in CodexBar's private cost cache; source transcripts are not modified. A plain sibling
+      takes precedence, and an active-session copy takes precedence over its matching archived copy.
+      Missing decoders or damaged archives leave the scan incomplete rather than verifying zero usage.
+      Decoding streams to disk once per source generation (with a 30-second timeout); subsequent JSONL parsing
+      keeps its existing decoded-byte budgets, resume offsets, and token anchors.
   - Supported pi-compatible sessions:
     - `~/.pi/agent/sessions/**/*.jsonl`
     - `~/.omp/agent/sessions/**/*.jsonl`

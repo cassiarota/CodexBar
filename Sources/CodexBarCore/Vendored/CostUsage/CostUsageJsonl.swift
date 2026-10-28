@@ -322,7 +322,8 @@ enum CostUsageJsonl {
         checkCancellation: (() throws -> Void)? = nil,
         onLine: (Line) -> Void) throws -> ScanProgress
     {
-        let handle = try FileHandle(forReadingFrom: fileURL)
+        let readableURL = try CostUsageCodexZstd.readableURL(fileURL)
+        let handle = try FileHandle(forReadingFrom: readableURL)
         defer { try? handle.close() }
 
         let startOffset = resumeState?.offset ?? max(0, offset)
@@ -338,7 +339,7 @@ enum CostUsageJsonl {
         var lineStartOffset = resumeState?.lineStartOffset ?? startOffset
         var committedOffset = lineStartOffset
         var jsonTailState = resumeState?.jsonTailState ?? JSONTailState()
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: readableURL.path)[.size] as? NSNumber)?
             .int64Value
 
         func appendSegment(_ bytes: UnsafePointer<UInt8>, count: Int) {

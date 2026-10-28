@@ -443,10 +443,22 @@ extension CostUsageScanner {
         let modifiedSeconds = Int64(info.st_mtimespec.tv_sec)
         let modifiedNanoseconds = Int64(info.st_mtimespec.tv_nsec)
         #endif
+        var size = Int64(info.st_size)
+        if CostUsageCodexZstd.isCompressed(fileURL) {
+            if let readable = try? CostUsageCodexZstd.readableURL(fileURL),
+               let attributes = try? FileManager.default.attributesOfItem(atPath: readable.path),
+               let decodedSize = attributes[.size] as? NSNumber
+            {
+                size = decodedSize.int64Value
+            } else {
+                // A broken empty archive still has pending decode work; it is not measured zero.
+                size = max(1, size)
+            }
+        }
         return CodexFileMetadata(
             path: path,
             mtimeUnixMs: modifiedSeconds * 1000 + modifiedNanoseconds / 1_000_000,
-            size: Int64(info.st_size),
+            size: size,
             fileId: "\(info.st_dev):\(info.st_ino)")
     }
 

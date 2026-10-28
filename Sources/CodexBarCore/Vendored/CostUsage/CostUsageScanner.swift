@@ -1476,7 +1476,7 @@ enum CostUsageScanner {
                 let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
                 if values?.isDirectory == true {
                     self.enqueueDirectory(item)
-                } else if item.pathExtension.lowercased() == "jsonl" {
+                } else if CostUsageCodexZstd.shouldRead(item) {
                     jsonlFileCount += 1
                     self.enqueueFile(item)
                 }
@@ -2167,11 +2167,17 @@ enum CostUsageScanner {
         // Provider-specific by design: Codex JSONL and Claude/Vertex transcripts have distinct parsers and caches.
         switch provider {
         case .codex:
-            return try self.loadCodexDaily(
-                range: range,
-                now: now,
-                options: options,
-                checkCancellation: checkCancellation)
+            return try CostUsageCodexZstd.$context.withValue(.init(
+                cacheRoot: options.cacheRoot,
+                roots: Self.codexSessionsRoots(options: options),
+                checkCancellation: checkCancellation))
+            {
+                try self.loadCodexDaily(
+                    range: range,
+                    now: now,
+                    options: options,
+                    checkCancellation: checkCancellation)
+            }
         case .claude:
             return try self.loadClaudeDaily(
                 provider: .claude,
@@ -2306,7 +2312,8 @@ enum CostUsageScanner {
             else { return nil }
             guard FileManager.default.fileExists(atPath: path) else { return nil }
             let fileURL = URL(fileURLWithPath: path)
-            guard Self.isWithinCodexRoots(fileURL: fileURL, roots: roots) else { return nil }
+            guard Self.isWithinCodexRoots(fileURL: fileURL, roots: roots),
+                  CostUsageCodexZstd.shouldRead(fileURL) else { return nil }
             return fileURL
         }
     }
@@ -2512,7 +2519,7 @@ enum CostUsageScanner {
         guard byteCount > 0 else { return nil }
 
         do {
-            let handle = try FileHandle(forReadingFrom: fileURL)
+            let handle = try FileHandle(forReadingFrom: CostUsageCodexZstd.readableURL(fileURL))
             defer { try? handle.close() }
             try handle.seek(toOffset: UInt64(windowStart))
             guard let data = try handle.read(upToCount: byteCount), data.count == byteCount else {
@@ -2608,7 +2615,7 @@ enum CostUsageScanner {
 
         var out: [URL] = []
         while let fileURL = enumerator.nextObject() as? URL {
-            guard fileURL.pathExtension.lowercased() == "jsonl" else { continue }
+            guard CostUsageCodexZstd.shouldRead(fileURL) else { continue }
             let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
             guard values?.isRegularFile == true else { continue }
             guard let modifiedAt = values?.contentModificationDate, modifiedAt >= modifiedSince else { continue }
@@ -2825,7 +2832,7 @@ enum CostUsageScanner {
                 directoryURL: dayDirectory,
                 resumeOffset: directoryOffset,
                 visitLimit: remainingVisits,
-                filter: { $0.lowercased().hasSuffix(".jsonl") },
+                filter: { CostUsageCodexZstd.shouldRead(dayDirectory.appendingPathComponent($0)) },
                 workRecorder: workRecorder)
             files.append(contentsOf: page.files)
             totalVisits += page.visits
@@ -2900,7 +2907,7 @@ enum CostUsageScanner {
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles])
             {
-                for item in items where item.pathExtension.lowercased() == "jsonl" {
+                for item in items where CostUsageCodexZstd.shouldRead(item) {
                     out.append(item)
                 }
             }
@@ -3001,7 +3008,7 @@ enum CostUsageScanner {
                 resumeOffset: state.currentWindowFlatDirectoryOffsetByRoot?[rootPath] ?? 0,
                 visitLimit: remainingDiscoveryVisits,
                 filter: { name in
-                    guard name.lowercased().hasSuffix(".jsonl") else { return false }
+                    guard CostUsageCodexZstd.shouldRead(root.appendingPathComponent(name)) else { return false }
                     guard let dayKey = Self.dayKeyFromFilename(name) else { return true }
                     return CostUsageDayRange.isInRange(
                         dayKey: dayKey,
@@ -3392,7 +3399,7 @@ enum CostUsageScanner {
         else { return [] }
 
         var out: [URL] = []
-        for item in items where item.pathExtension.lowercased() == "jsonl" {
+        for item in items where CostUsageCodexZstd.shouldRead(item) {
             if let dayKey = Self.dayKeyFromFilename(item.lastPathComponent) {
                 if !CostUsageDayRange.isInRange(dayKey: dayKey, since: scanSinceKey, until: scanUntilKey) {
                     continue
@@ -3418,7 +3425,7 @@ enum CostUsageScanner {
                 enumerator.skipDescendants()
                 continue
             }
-            guard item.pathExtension.lowercased() == "jsonl" else { continue }
+            guard CostUsageCodexZstd.shouldRead(item) else { continue }
             out.append(item)
         }
         return out
@@ -3433,7 +3440,7 @@ enum CostUsageScanner {
 
     private static let codexFilenameDateRegex = try? NSRegularExpression(pattern: "(\\d{4}-\\d{2}-\\d{2})")
 
-    private static func dayKeyFromFilename(_ filename: String) -> String? {
+    static func dayKeyFromFilename(_ filename: String) -> String? {
         guard let regex = self.codexFilenameDateRegex else { return nil }
         let range = NSRange(filename.startIndex..<filename.endIndex, in: filename)
         guard let match = regex.firstMatch(in: filename, range: range) else { return nil }
@@ -3974,7 +3981,7 @@ enum CostUsageScanner {
     {
         let handle: FileHandle
         do {
-            handle = try FileHandle(forReadingFrom: fileURL)
+            handle = try FileHandle(forReadingFrom: CostUsageCodexZstd.readableURL(fileURL))
         } catch {
             self.log.warning(
                 "Codex cost usage failed to open session file for session id parsing",
@@ -6007,6 +6014,9 @@ enum CostUsageScanner {
         let loadedCache = Self.loadCodexCache(options: options, range: range)
         defer { loadedCache.release() }
         var cache = loadedCache.cache
+        for path in cache.files.keys where !CostUsageCodexZstd.shouldRead(URL(fileURLWithPath: path)) {
+            Self.dropCachedCodexFile(path: path, cached: cache.files[path], cache: &cache)
+        }
         let history = CodexScanHistoryHydrator(load: loadedCache)
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
         // Timed warm refreshes can become catch-up work too. Keep their actual discovery range
