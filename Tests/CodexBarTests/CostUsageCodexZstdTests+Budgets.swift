@@ -4,6 +4,30 @@ import Testing
 
 extension CostUsageCodexZstdTests {
     @Test
+    func `cleanup in another cache cannot discard a paused decoder`() throws {
+        let env = try CostUsageTestEnvironment()
+        let other = try CostUsageTestEnvironment()
+        defer {
+            env.cleanup()
+            other.cleanup()
+        }
+        let source = env.root.appendingPathComponent("session.jsonl.zst")
+        try self.archive.write(to: source)
+        try self.withContext(env) {
+            let budget = CostUsageScanner.CodexScanBudget(maxFileBytes: 17, maxBytesPerRefresh: 17)
+            let complete = try CostUsageCodexZstd.prepare(source, budget: budget)
+            #expect(!complete)
+            let snapshot = try CostUsageCodexZstd.Snapshot(source: source)
+            self.withContext(other) { CostUsageCodexZstd.pruneCache() }
+            let retained = CostUsageCodexZstd.registry.lock.withLock {
+                CostUsageCodexZstd.registry.sessions[snapshot.directory.path] != nil
+            }
+            #expect(retained)
+            #expect(try CostUsageCodexZstd.prepare(source, budget: nil))
+        }
+    }
+
+    @Test
     func `an expired decoder slice yields and continues on a later refresh`() throws {
         let env = try CostUsageTestEnvironment()
         defer { env.cleanup() }

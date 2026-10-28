@@ -98,6 +98,8 @@ struct CostUsageCodexZstdTests {
             }
             #expect(try Data(contentsOf: source) == self.archive)
             #expect(try CostUsageCodexZstd.readableURL(source) == decoded)
+            CostUsageCodexZstd.pruneCache()
+            #expect(try CostUsageCodexZstd.readableURL(source) == decoded)
             let attributes = try FileManager.default.attributesOfItem(atPath: decoded.path)
             #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
             try self.replacementArchive.write(to: source, options: .atomic)

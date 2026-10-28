@@ -11,6 +11,7 @@ extension CostUsageCodexZstd {
     static var cacheDirectory: URL {
         CostUsageStore.databaseURL(cacheRoot: self.context?.cacheRoot)
             .deletingLastPathComponent().appendingPathComponent("zstd", isDirectory: true)
+            .resolvingSymlinksInPath()
     }
 
     struct Snapshot {
@@ -27,7 +28,7 @@ extension CostUsageCodexZstd {
             else { throw CocoaError(.fileReadUnknown) }
             self.source = source
             self.directory = CostUsageCodexZstd.cacheDirectory.appendingPathComponent(
-                CostUsageCodexZstd.digest(source.standardizedFileURL.path), isDirectory: true)
+                CostUsageCodexZstd.digest(CostUsageStore.normalizedCodexPath(source.path)), isDirectory: true)
             let generation = CostUsageCodexZstd.digest("\(inode)|\(size)|\(modified.timeIntervalSince1970.bitPattern)")
             self.destination = self.directory.appendingPathComponent(generation).appendingPathExtension("jsonl")
             self.partial = self.directory.appendingPathComponent(generation).appendingPathExtension("partial")
@@ -72,14 +73,16 @@ extension CostUsageCodexZstd {
     static func pruneCache() {
         guard self.registry.lock.try() else { return }
         defer { self.registry.lock.unlock() }
-        for (key, session) in self.registry.sessions {
+        let root = self.cacheDirectory
+        for (key, session) in self.registry.sessions
+            where session.snapshot.directory.deletingLastPathComponent().path == root.path
+        {
             if !self.isRegularFile(session.snapshot.source) || !self.shouldRead(session.snapshot.source)
                 || (try? Snapshot(source: session.snapshot.source).destination) != session.snapshot.destination
             {
                 self.registry.sessions.removeValue(forKey: key)
             }
         }
-        let root = self.cacheDirectory
         guard let lockDescriptor = try? self.openPrivateFile(root.appendingPathComponent("sweep-lock")) else { return }
         defer { close(lockDescriptor) }
         guard flock(lockDescriptor, LOCK_EX | LOCK_NB) == 0,
@@ -114,10 +117,12 @@ extension CostUsageCodexZstd {
         let source = (try? String(contentsOf: directory.appendingPathComponent("source"), encoding: .utf8))
             .map { URL(fileURLWithPath: $0) }
         let current = source.flatMap { self.shouldRead($0) ? try? Snapshot(source: $0) : nil }
+        let keepNames = Set([current?.destination.lastPathComponent, current?.partial.lastPathComponent]
+            .compactMap(\.self))
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         else { return }
         for file in files where ["jsonl", "partial"].contains(file.pathExtension) {
-            if file == current?.destination || file == current?.partial { continue }
+            if keepNames.contains(file.lastPathComponent) { continue }
             guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
             if flock(handle.fileDescriptor, LOCK_EX | LOCK_NB) == 0 {
                 try? FileManager.default.removeItem(at: file)
