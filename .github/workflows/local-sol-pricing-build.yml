@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: 79a126d6b9f1c455c667def1d0818684d8702ca9
+  FIX_COMMIT: 82f0019354aca8930886921f5fffca5eeb878696
 
 jobs:
   check:
@@ -43,7 +43,7 @@ jobs:
       - name: Focused pricing and session tier regression tests
         run: >-
           make test-fast
-          FILTER='CostUsage(SolFastPricing|Pricing|AstraPricing|CodexSessionTier|ScannerCodexPriority)Tests'
+          FILTER='CostUsage(SolFastPricing|Pricing|AstraPricing|CodexSessionTier|ScannerCodexPriority|CodexSourceRecovery|RequestLedgerMigration|Store)Tests'
       - name: Build local signed app
         env:
           CODEXBAR_SIGNING: adhoc
