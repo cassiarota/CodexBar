@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: bf0e62e87d61c0ca2ef1b235d26bc22996db1bcf
+  FIX_COMMIT: f4f98aa1b46099d552a3bdd22e51f2f1883269b7
 
 jobs:
   check:
