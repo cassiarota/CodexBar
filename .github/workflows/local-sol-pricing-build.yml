@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: 82f0019354aca8930886921f5fffca5eeb878696
+  FIX_COMMIT: 58704026edf79544dce8437a48b9215488c52951
 
 jobs:
   check:
@@ -27,7 +27,7 @@ jobs:
       - name: Repository checks
         run: make check
 
-  build:
+  tests:
     runs-on: xcode-27
     timeout-minutes: 90
     steps:
@@ -44,6 +44,20 @@ jobs:
         run: >-
           make test-fast
           FILTER='CostUsage(SolFastPricing|Pricing|AstraPricing|CodexSessionTier|ScannerCodexPriority|CodexSourceRecovery|RequestLedgerMigration|Store)Tests'
+
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.FIX_COMMIT }}
+          persist-credentials: false
+      - name: Select Xcode 27
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
+          swift --version
       - name: Build local signed app
         env:
           CODEXBAR_SIGNING: adhoc
