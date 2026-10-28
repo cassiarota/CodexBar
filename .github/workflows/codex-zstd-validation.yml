@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: a186d28262bfa8f72c1c30d72113cc999f19b200
+  FIX_COMMIT: eb806485d8f639615a661eeac93c71db2de4b86e
 
 jobs:
   check:
@@ -57,6 +57,7 @@ jobs:
           tests.mkdir(parents=True)
           for name in [
               "CostUsageCodexZstdTests.swift",
+              "CostUsageCodexZstdTests+Budgets.swift",
               "CostUsageJsonlScannerTests.swift",
               "CostUsageScannerTests.swift",
               "CostUsageStoreTests.swift",
@@ -80,3 +81,27 @@ jobs:
           (harness / "Package.swift").write_text(manifest)
           PYTHON
           swift test --package-path "$RUNNER_TEMP/codex-zstd-validation" --parallel
+      - name: Build the production cost command
+        run: swift build --product CodexBarCLI --scratch-path "$RUNNER_TEMP/codex-zstd-validation/.build"
+      - name: Verify released CLI and exercise synthetic production behavior
+        run: |
+          mkdir -p "$RUNNER_TEMP/codexbar-stable"
+          case "$(uname -m)" in
+            arm64)
+              proof_arch=arm64
+              proof_sha=5e6d922fbebbd41a748bc906500740529265e65afbc7ffd2ce8c8794fc5edf76
+              ;;
+            x86_64)
+              proof_arch=x86_64
+              proof_sha=aca88b9b916197e5e0dba33c0e2a8e78f27d4a40760acf849509060b630cea0c
+              ;;
+          esac
+          curl --fail --location --silent --show-error \
+            "https://github.com/steipete/CodexBar/releases/download/v0.82.0/CodexBarCLI-v0.82.0-macos-$proof_arch.tar.gz" \
+            --output "$RUNNER_TEMP/codexbar-stable/cli.tar.gz"
+          printf '%s  %s\n' "$proof_sha" "$RUNNER_TEMP/codexbar-stable/cli.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/codexbar-stable/cli.tar.gz" -C "$RUNNER_TEMP/codexbar-stable"
+          proof_bin=$(swift build --show-bin-path --scratch-path "$RUNNER_TEMP/codex-zstd-validation/.build")
+          python3 .github/pr-proof/codex-zstd-history/run-proof.py \
+            --base "$RUNNER_TEMP/codexbar-stable/codexbar" \
+            --head "$proof_bin/CodexBarCLI" --large
