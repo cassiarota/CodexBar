@@ -61,6 +61,8 @@ jobs:
               "CostUsageScannerTests.swift",
               "CostUsageStoreTests.swift",
               "CostUsageTestFactory.swift",
+              "CostUsageClaudeCacheTestSupport.swift",
+              "LockIsolated.swift",
               "DirectoryMetadataScanBudgetTests.swift",
           ]:
               shutil.copyfile(source / "Tests/CodexBarTests" / name, tests / name)
