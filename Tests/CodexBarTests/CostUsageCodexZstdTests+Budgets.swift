@@ -106,8 +106,8 @@ extension CostUsageCodexZstdTests {
         try FileManager.default.removeItem(at: plain)
         var options = self.options(env)
         options.maxCodexScanDurationPerRefresh = 60
-        options.maxCodexSessionFileBytes = 17
-        options.maxCodexScanBytesPerRefresh = 17
+        options.maxCodexSessionFileBytes = 512
+        options.maxCodexScanBytesPerRefresh = 512
         func queuePagedRefresh() {
             var cached = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
             cached.codexScanCatchUpPending = true
