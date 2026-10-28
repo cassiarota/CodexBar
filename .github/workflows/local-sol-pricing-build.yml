@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: 46058e55a7a01be8b81006b897bb6edbe8e7a8e5
+  FIX_COMMIT: 79a126d6b9f1c455c667def1d0818684d8702ca9
 
 jobs:
   check:
@@ -29,7 +29,7 @@ jobs:
 
   build:
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
