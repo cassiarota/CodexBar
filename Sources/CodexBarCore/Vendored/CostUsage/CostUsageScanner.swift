@@ -4878,6 +4878,15 @@ enum CostUsageScanner {
             requestLedger.turnPerformance?[turnID] = performance
         }
 
+        func observeThreadPriority(for turnID: String?) {
+            if requestLedger.threadPriority == true {
+                if requestLedger.priorityTurnIDs == nil { requestLedger.priorityTurnIDs = [] }
+                requestLedger.priorityTurnIDs?.insert(turnID ?? "")
+            } else {
+                requestLedger.priorityTurnIDs?.remove(turnID ?? "")
+            }
+        }
+
         @discardableResult
         func processFastLine(
             _ fastLine: CodexFastLine,
@@ -4894,6 +4903,10 @@ enum CostUsageScanner {
                 if let title = Self.codexModelEvidence(metadata.title) { codexSession.title = title }
                 if let turnID = metadata.turnID {
                     requestLedger.activeTurnID = turnID
+                    // Resuming a turn can refresh its context without another task_started event.
+                    if requestLedger.threadPriority != nil, currentTurnID == nil || currentTurnID == turnID {
+                        observeThreadPriority(for: turnID)
+                    }
                 }
                 if let model = metadata.model {
                     // An explicitly blank context clears stale model evidence; an omitted field preserves it.
@@ -4912,12 +4925,7 @@ enum CostUsageScanner {
             case let .taskStarted(turnID):
                 requestLedger.clearPendingMirrors()
                 currentTurnID = turnID
-                if requestLedger.threadPriority == true {
-                    if requestLedger.priorityTurnIDs == nil { requestLedger.priorityTurnIDs = [] }
-                    requestLedger.priorityTurnIDs?.insert(turnID ?? "")
-                } else {
-                    requestLedger.priorityTurnIDs?.remove(turnID ?? "")
-                }
+                observeThreadPriority(for: turnID)
                 if let turnID { requestLedger.turnPerformance?[turnID]?.completion = nil }
             case let .taskCompleted(completion):
                 guard !suppressUnownedCopiedPrefix else { return nil }
