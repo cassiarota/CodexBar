@@ -108,6 +108,13 @@ extension CostUsageCodexZstdTests {
         options.maxCodexScanDurationPerRefresh = 60
         options.maxCodexSessionFileBytes = 17
         options.maxCodexScanBytesPerRefresh = 17
+        func queuePagedRefresh() {
+            var cached = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+            cached.codexScanCatchUpPending = true
+            cached.codexActiveLookbackState = nil
+            CostUsageStoreAccess.replace(cacheRoot: env.cacheRoot, cache: cached)
+        }
+        queuePagedRefresh()
         var completed = false
         for _ in 0..<200 {
             let report = self.report(day: day, options: options)
@@ -127,6 +134,7 @@ extension CostUsageCodexZstdTests {
         // Copy-and-delete also changes the inode, so physical-file aliasing cannot reconcile it.
         try FileManager.default.copyItem(at: compressed, to: archived)
         try FileManager.default.removeItem(at: compressed)
+        queuePagedRefresh()
         completed = false
         for _ in 0..<200 {
             let report = self.report(day: day, options: options)
