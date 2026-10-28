@@ -1,0 +1,65 @@
+name: Build local Sol pricing fix
+
+on:
+  push:
+    branches: [build/gpt61-sol-fast-pricing]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FIX_COMMIT: 46058e55a7a01be8b81006b897bb6edbe8e7a8e5
+
+jobs:
+  check:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.FIX_COMMIT }}
+          persist-credentials: false
+      - name: Select Xcode 27
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
+      - name: Repository checks
+        run: make check
+
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.FIX_COMMIT }}
+          persist-credentials: false
+      - name: Select Xcode 27
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
+          swift --version
+      - name: Focused pricing and session tier regression tests
+        run: >-
+          make test-fast
+          FILTER='CostUsage(SolFastPricing|Pricing|AstraPricing|CodexSessionTier|ScannerCodexPriority)Tests'
+      - name: Build local signed app
+        env:
+          CODEXBAR_SIGNING: adhoc
+          ARCHES: arm64
+          CODEXBAR_WIDGET_EXTENSION_TIMEOUT_SECONDS: '1800'
+        run: ./Scripts/package_app.sh release
+      - name: Package artifact and record source
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent CodexBar.app CodexBar-gpt61-sol-fast-arm64.zip
+          shasum -a 256 CodexBar-gpt61-sol-fast-arm64.zip > CodexBar-gpt61-sol-fast-arm64.zip.sha256
+          printf '%s\n' "$FIX_COMMIT" > source-commit.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: CodexBar-gpt61-sol-fast-arm64
+          path: |
+            CodexBar-gpt61-sol-fast-arm64.zip
+            CodexBar-gpt61-sol-fast-arm64.zip.sha256
+            source-commit.txt
+          if-no-files-found: error
