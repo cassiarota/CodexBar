@@ -9,9 +9,8 @@ import Darwin
 
 extension CostUsageCodexZstd {
     static var cacheDirectory: URL {
-        let root = self.context?.cacheRoot
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        return root.appendingPathComponent("CodexBar/cost-usage/zstd", isDirectory: true)
+        CostUsageStore.databaseURL(cacheRoot: self.context?.cacheRoot)
+            .deletingLastPathComponent().appendingPathComponent("zstd", isDirectory: true)
     }
 
     struct Snapshot {

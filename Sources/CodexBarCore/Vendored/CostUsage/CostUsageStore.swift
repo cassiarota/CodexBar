@@ -272,12 +272,20 @@ extension CostUsageStore {
     private nonisolated func syncWithStoreIsolation<T: Sendable>(
         _ operation: (isolated CostUsageStore) throws -> T) rethrows -> T
     {
-        try self.executor.sync {
+        let scanContext = CostUsageCodexZstd.context
+        return try self.executor.sync {
             self.executor.checkIsolated()
             typealias Isolated = (isolated CostUsageStore) throws -> T
             typealias Unisolated = (CostUsageStore) throws -> T
-            return try withoutActuallyEscaping(operation) { (operation: @escaping Isolated) throws -> T in
-                try unsafeBitCast(operation, to: Unisolated.self)(self)
+            // Dispatch does not carry task locals; metadata reconciliation must use this store's snapshots.
+            return try CostUsageCodexZstd.$context.withValue(.init(
+                cacheRoot: self.databaseURL.deletingLastPathComponent().deletingLastPathComponent(),
+                roots: scanContext?.roots ?? [],
+                checkCancellation: scanContext?.checkCancellation))
+            {
+                try withoutActuallyEscaping(operation) { (operation: @escaping Isolated) throws -> T in
+                    try unsafeBitCast(operation, to: Unisolated.self)(self)
+                }
             }
         }
     }

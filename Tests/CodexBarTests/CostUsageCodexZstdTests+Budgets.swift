@@ -114,6 +114,15 @@ extension CostUsageCodexZstdTests {
             cached.codexActiveLookbackState = nil
             CostUsageStoreAccess.replace(cacheRoot: env.cacheRoot, cache: cached)
         }
+        func progressDetails() -> String {
+            let cached = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+            let files = cached.files.values.map {
+                "size=\($0.size),parsed=\($0.parsedBytes ?? -1),complete=\($0.codexScanComplete == true)"
+            }.joined(separator: ";")
+            return "files:[\(files)],queue:\(cached.codexActiveLookbackState?.pendingFilePaths.count ?? -1),"
+                + "head:\(cached.codexSessionDiscovery?.headScan?.offset ?? -1),"
+                + "discovery:\(cached.codexSessionDiscovery?.isComplete == true)"
+        }
         queuePagedRefresh()
         var completed = false
         for _ in 0..<200 {
@@ -127,7 +136,7 @@ extension CostUsageCodexZstdTests {
                 break
             }
         }
-        #expect(completed)
+        #expect(completed, "\(progressDetails())")
 
         let compressed = plain.appendingPathExtension("zst")
         let archived = env.codexArchivedSessionsRoot.appendingPathComponent(compressed.lastPathComponent)
@@ -147,7 +156,7 @@ extension CostUsageCodexZstdTests {
                 break
             }
         }
-        #expect(completed)
+        #expect(completed, "\(progressDetails())")
     }
 
     @Test
