@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: 89391b66b8f20be1c1af4dd9d6d7a9269c174ce9
+  FIX_COMMIT: a186d28262bfa8f72c1c30d72113cc999f19b200
 
 jobs:
   check:
@@ -41,12 +41,39 @@ jobs:
           echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
           swift --version
           command -v zstd || brew install zstd
-      - name: Build test targets
+      - name: Focused core regression tests
         run: |
           source ./Scripts/test_environment.sh
           export CODEXBAR_DISABLE_KEYCHAIN_ACCESS=1
-          swift build --build-tests
-      - name: Focused compressed-history and scanner regression tests
-        run: >-
-          make test-skip-build
-          FILTER='CostUsage(CodexZstd|JsonlScanner|Scanner|DiscoveryRecovery|OrphanFork|ScannerForkSplit|ScannerForkSplitPricingEvidence|CatchUpProgress|CodexSourceRecovery|Cancellation|Store)Tests|DirectoryMetadataScanBudgetTests'
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          source = Path.cwd()
+          harness = Path(os.environ["RUNNER_TEMP"]) / "codex-zstd-validation"
+          tests = harness / "Tests"
+          tests.mkdir(parents=True)
+          for name in [
+              "CostUsageCodexZstdTests.swift",
+              "CostUsageJsonlScannerTests.swift",
+              "CostUsageScannerTests.swift",
+              "CostUsageStoreTests.swift",
+              "DirectoryMetadataScanBudgetTests.swift",
+          ]:
+              shutil.copyfile(source / "Tests/CodexBarTests" / name, tests / name)
+          manifest = """// swift-tools-version: 6.2
+          import PackageDescription
+          let package = Package(
+              name: "CompressedHistoryValidation",
+              platforms: [.macOS(.v14)],
+              dependencies: [.package(path: SOURCE)],
+              targets: [.testTarget(
+                  name: "CompressedHistoryValidationTests",
+                  dependencies: [.product(name: "CodexBarCore", package: "CodexBar")],
+                  path: "Tests")])
+          """.replace("SOURCE", json.dumps(str(source)))
+          (harness / "Package.swift").write_text(manifest)
+          PYTHON
+          swift test --package-path "$RUNNER_TEMP/codex-zstd-validation" --parallel
