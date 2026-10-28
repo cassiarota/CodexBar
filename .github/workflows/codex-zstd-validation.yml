@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: 3f01d2e3edb52d5b6bfef12f104dc7b58e4839d5
+  FIX_COMMIT: 89391b66b8f20be1c1af4dd9d6d7a9269c174ce9
 
 jobs:
   check:
@@ -49,4 +49,4 @@ jobs:
       - name: Focused compressed-history and scanner regression tests
         run: >-
           make test-skip-build
-          FILTER='CostUsage(CodexZstd|JsonlScanner|Scanner|DiscoveryRecovery|OrphanFork|ScannerForkSplit|ScannerForkSplitPricingEvidence|CatchUpProgress|CodexSourceRecovery|Cancellation)Tests|DirectoryMetadataScanBudgetTests'
+          FILTER='CostUsage(CodexZstd|JsonlScanner|Scanner|DiscoveryRecovery|OrphanFork|ScannerForkSplit|ScannerForkSplitPricingEvidence|CatchUpProgress|CodexSourceRecovery|Cancellation|Store)Tests|DirectoryMetadataScanBudgetTests'
