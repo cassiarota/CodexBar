@@ -122,6 +122,7 @@ actor CostUsageStore {
         parserHash: CodexParserHash.value)
     static let cacheGeneration = "sqlite:\(CostUsageStore.schemaVersion)"
     static let compatiblePredecessorParserHashes: Set<String> = [
+        "e5909f60274b2c47", // Compressed rollout discovery preserves existing native rows and checkpoints.
         "4e1358d00a4a47b5", // Optional source ownership preserves existing native Codex rows and checkpoints.
         "54a95e8fe7bd6ee9", // Validating inspection checkpoints leaves persisted rows and scan progress unchanged.
         "455876ace937d42a", // Selected-session detail reads leave current-main native rows and checkpoints unchanged.
