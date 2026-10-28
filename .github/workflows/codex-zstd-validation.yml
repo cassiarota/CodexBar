@@ -1,0 +1,52 @@
+name: Validate compressed Codex history
+
+on:
+  push:
+    branches: [ci/codex-zstd-cost-history]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FIX_COMMIT: 3f01d2e3e
+
+jobs:
+  check:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.FIX_COMMIT }}
+          persist-credentials: false
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
+      - name: Repository checks
+        run: make check
+
+  tests:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.FIX_COMMIT }}
+          persist-credentials: false
+      - name: Select Xcode and verify decoder
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
+          swift --version
+          command -v zstd || brew install zstd
+      - name: Build test targets
+        run: |
+          source ./Scripts/test_environment.sh
+          export CODEXBAR_DISABLE_KEYCHAIN_ACCESS=1
+          swift build --build-tests
+      - name: Focused compressed-history and scanner regression tests
+        run: >-
+          make test-skip-build
+          FILTER='CostUsage(CodexZstd|JsonlScanner|Scanner|DiscoveryRecovery|OrphanFork|ScannerForkSplit|ScannerForkSplitPricingEvidence|CatchUpProgress|CodexSourceRecovery|Cancellation)Tests|DirectoryMetadataScanBudgetTests'
