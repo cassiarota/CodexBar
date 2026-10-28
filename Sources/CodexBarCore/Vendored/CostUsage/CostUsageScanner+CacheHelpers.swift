@@ -445,15 +445,8 @@ extension CostUsageScanner {
         #endif
         var size = Int64(info.st_size)
         if CostUsageCodexZstd.isCompressed(fileURL) {
-            if let readable = try? CostUsageCodexZstd.readableURL(fileURL),
-               let attributes = try? FileManager.default.attributesOfItem(atPath: readable.path),
-               let decodedSize = attributes[.size] as? NSNumber
-            {
-                size = decodedSize.int64Value
-            } else {
-                // A broken empty archive still has pending decode work; it is not measured zero.
-                size = max(1, size)
-            }
+            // Metadata remains cheap; only an admitted scan may materialize a decoded snapshot.
+            size = CostUsageCodexZstd.decodedSize(fileURL) ?? max(1, size)
         }
         return CodexFileMetadata(
             path: path,

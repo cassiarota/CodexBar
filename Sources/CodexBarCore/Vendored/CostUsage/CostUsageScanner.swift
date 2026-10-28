@@ -280,7 +280,7 @@ enum CostUsageScanner {
             case deferBudget
         }
 
-        func admit(workBytes: Int64) -> Admission {
+        func admit(workBytes: Int64, tracksPartialFile: Bool = true) -> Admission {
             let work = max(0, workBytes)
             if work > 0, self.shouldYield(additionalBytes: 0) {
                 self.deferredByBudgetFileCount += 1
@@ -295,11 +295,15 @@ enum CostUsageScanner {
             }
             let fileAllowance = self.maxFileBytes > 0 ? self.maxFileBytes : Int64.max
             let allowance = min(work, fileAllowance, refreshRemaining)
-            if allowance < work {
+            if tracksPartialFile, allowance < work {
                 self.resumedPartialFileCount += 1
             }
             self.bytesReserved += allowance
             return .allow(allowance)
+        }
+
+        func recordPartialFile() {
+            self.resumedPartialFileCount += 1
         }
 
         func consume(workBytes: Int64) {
@@ -1383,6 +1387,12 @@ enum CostUsageScanner {
                 self.advancePastHead(path: path, stamp: nil)
                 return true
             }
+            do {
+                guard try CostUsageCodexZstd.prepare(fileURL, budget: self.scanBudget) else { return false }
+            } catch {
+                try self.checkCancellation?()
+                return false
+            }
             let metadata = CostUsageScanner.codexFileMetadata(fileURL: fileURL)
             guard metadata.fileId != nil else {
                 if let scanBudget = self.scanBudget {
@@ -2179,7 +2189,8 @@ enum CostUsageScanner {
                 roots: Self.codexSessionsRoots(options: options),
                 checkCancellation: checkCancellation))
             {
-                try self.loadCodexDaily(
+                defer { CostUsageCodexZstd.pruneCache() }
+                return try self.loadCodexDaily(
                     range: range,
                     now: now,
                     options: options,
@@ -2526,7 +2537,7 @@ enum CostUsageScanner {
         guard byteCount > 0 else { return nil }
 
         do {
-            let handle = try FileHandle(forReadingFrom: CostUsageCodexZstd.readableURL(fileURL))
+            let handle = try CostUsageCodexZstd.openReadableFile(fileURL)
             defer { try? handle.close() }
             try handle.seek(toOffset: UInt64(windowStart))
             guard let data = try handle.read(upToCount: byteCount), data.count == byteCount else {
@@ -3988,7 +3999,7 @@ enum CostUsageScanner {
     {
         let handle: FileHandle
         do {
-            handle = try FileHandle(forReadingFrom: CostUsageCodexZstd.readableURL(fileURL))
+            handle = try CostUsageCodexZstd.openReadableFile(fileURL)
         } catch {
             self.log.warning(
                 "Codex cost usage failed to open session file for session id parsing",
@@ -5494,6 +5505,27 @@ enum CostUsageScanner {
         return context.resources.scanHistoryHydrator.isHydrated(for: [fileURL], cache: cache)
     }
 
+    private static func prepareCodexSource(
+        fileURL: URL,
+        context: CodexFileScanContext,
+        cache: inout CostUsageCache) throws -> Bool
+    {
+        do {
+            guard try CostUsageCodexZstd.prepare(fileURL, budget: context.scanBudget) else { return false }
+        } catch {
+            try context.checkCancellation?()
+            return false
+        }
+        // Retire the counted representation in the same transaction that publishes its replacement.
+        for path in CostUsageCodexZstd.supersededPaths(for: fileURL) where cache.files[path] != nil {
+            Self.dropCachedCodexFile(path: path, cached: cache.files[path], cache: &cache)
+            context.resources.cachePathAliasIndex.update(path: path, fileID: nil)
+            context.resources.scanHistoryHydrator.removeHistory(path: path)
+            context.resources.inheritedResolver.updateCachedUsage(fileURL: URL(fileURLWithPath: path), usage: nil)
+        }
+        return true
+    }
+
     private static func scanCodexFile(
         fileURL: URL,
         context: CodexFileScanContext,
@@ -5502,11 +5534,12 @@ enum CostUsageScanner {
         loadHistoryBeforeFreshness: Bool = false) throws -> CodexFileScanOutcome
     {
         try context.checkCancellation?()
-        let metadata = Self.codexFileMetadata(fileURL: fileURL)
-        guard CostUsageCodexZstd.shouldRead(fileURL) else {
-            Self.dropCachedCodexFile(path: metadata.path, cached: cache.files[metadata.path], cache: &cache)
-            return .processed
+        guard CostUsageCodexZstd.shouldRead(fileURL) else { return .processed }
+        guard try self.prepareCodexSource(fileURL: fileURL, context: context, cache: &cache) else {
+            state.deferredCachePaths.insert(fileURL.path)
+            return .deferred
         }
+        let metadata = Self.codexFileMetadata(fileURL: fileURL)
         if context.sourceRowRecoveryPathKeys.contains(Self.codexPathKey(fileURL))
             || cache.files[metadata.path]?.codexPendingSourcePricing != nil
         {
@@ -6084,9 +6117,6 @@ enum CostUsageScanner {
         if plan.shouldRefresh {
             let range = scanRange
             try checkCancellation?()
-            for path in cache.files.keys where !CostUsageCodexZstd.shouldRead(URL(fileURLWithPath: path)) {
-                Self.dropCachedCodexFile(path: path, cached: cache.files[path], cache: &cache)
-            }
             if options.forceRescan {
                 cache = CostUsageCache()
                 history.reset()

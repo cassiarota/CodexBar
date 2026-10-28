@@ -4,8 +4,15 @@ import CryptoKit
 import Crypto
 #endif
 import Foundation
+#if canImport(Musl)
+import Musl
+#elseif canImport(Glibc)
+import Glibc
+#else
+import Darwin
+#endif
 
-/// Keep decoded offsets seekable for the existing bounded JSONL reader and token anchors.
+/// Decompression is admitted explicitly; metadata and readers never start a decoder.
 enum CostUsageCodexZstd {
     final class Context: @unchecked Sendable {
         let cacheRoot: URL?
@@ -34,6 +41,8 @@ enum CostUsageCodexZstd {
         guard self.isSessionFile(url) else { return false }
         let plain = self.isCompressed(url) ? url.deletingPathExtension() : url
         if self.isCompressed(url), self.isRegularFile(plain) { return false }
+        if !self.isCompressed(url), !self.isRegularFile(url),
+           self.isRegularFile(url.appendingPathExtension("zst")) { return false }
         if let roots = self.context?.roots, roots.count == 2 {
             let archivedPrefix = roots[1].standardizedFileURL.path + "/"
             let path = plain.standardizedFileURL.path
@@ -55,88 +64,134 @@ enum CostUsageCodexZstd {
         return true
     }
 
-    static func readableURL(_ source: URL) throws -> URL {
-        guard self.isCompressed(source) else { return source }
-        try self.context?.checkCancellation?()
-        let before = try self.fingerprint(source)
-        let key = SHA256.hash(data: Data((source.standardizedFileURL.path + "\n" + before).utf8))
-            .map { String(format: "%02x", $0) }.joined()
-        let root = self.context?.cacheRoot
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let directory = root.appendingPathComponent("CodexBar/cost-usage/zstd", isDirectory: true)
-        let destination = directory.appendingPathComponent(key).appendingPathExtension("jsonl")
-        if self.isRegularFile(destination) { return destination }
-
-        let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
-            + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
-        guard let executable = self.executableOverrideForTesting
-            ?? BinaryLocator.find("zstd", in: paths, fileManager: .default).map(URL.init(fileURLWithPath:))
-        else { throw SubprocessRunnerError.binaryNotFound("zstd") }
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw SubprocessRunnerError.binaryNotFound("zstd")
-        }
-
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
-        let temporary = directory.appendingPathComponent("\(UUID().uuidString).tmp")
-        guard FileManager.default.createFile(
-            atPath: temporary.path,
-            contents: nil,
-            attributes: [.posixPermissions: 0o600])
-        else { throw CocoaError(.fileWriteUnknown) }
-        defer { try? FileManager.default.removeItem(at: temporary) }
-
-        let output = try FileHandle(forWritingTo: temporary)
-        defer { try? output.close() }
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["--quiet", "--decompress", "--stdout", "--", source.path]
-        process.environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        defer {
-            if process.isRunning {
-                SubprocessRunner.terminateProcess(process, processGroup: nil)
+    static func supersededPaths(for url: URL) -> [String] {
+        let plain = self.isCompressed(url) ? url.deletingPathExtension() : url
+        var candidates = [plain, plain.appendingPathExtension("zst")]
+        if let roots = self.context?.roots, roots.count == 2 {
+            let activePrefix = roots[0].standardizedFileURL.path + "/"
+            let path = plain.standardizedFileURL.path
+            if path.hasPrefix(activePrefix) {
+                let relative = String(path.dropFirst(activePrefix.count))
+                for archived in [
+                    roots[1].appendingPathComponent(relative),
+                    roots[1].appendingPathComponent(plain.lastPathComponent),
+                ] {
+                    candidates.append(contentsOf: [archived, archived.appendingPathExtension("zst")])
+                }
             }
         }
-        let deadline = Date().addingTimeInterval(30)
-        while process.isRunning {
-            try self.context?.checkCancellation?()
-            guard Date() < deadline else { throw SubprocessRunnerError.timedOut("Zstandard rollout decoding") }
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-        process.waitUntilExit()
-        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
-            throw SubprocessRunnerError.nonZeroExit(
-                code: process.terminationStatus,
-                stderr: "Invalid Zstandard rollout")
-        }
-        try output.close()
-        guard try self.fingerprint(source) == before else { throw CocoaError(.fileReadUnknown) }
-        do {
-            try FileManager.default.moveItem(at: temporary, to: destination)
-        } catch {
-            // A concurrent app/CLI scan may have published the same immutable generation.
-            guard self.isRegularFile(destination) else { throw error }
-        }
+        return candidates.filter { $0.standardizedFileURL != url.standardizedFileURL }.map(\.path)
+    }
+
+    /// Only complete, validated generations are visible to parsers.
+    static func readableURL(_ source: URL) throws -> URL {
+        guard self.isCompressed(source) else { return source }
+        let destination = try Snapshot(source: source).destination
+        guard self.isRegularFile(destination) else { throw CocoaError(.fileReadUnknown) }
         return destination
     }
 
-    private static func isRegularFile(_ url: URL) -> Bool {
+    static func openReadableFile(_ source: URL) throws -> FileHandle {
+        let handle = try FileHandle(forReadingFrom: self.readableURL(source))
+        // Retiring a generation must leave a concurrent reader's transcript intact.
+        if self.isCompressed(source), flock(handle.fileDescriptor, LOCK_SH | LOCK_NB) != 0 {
+            try? handle.close()
+            throw CocoaError(.fileReadUnknown)
+        }
+        return handle
+    }
+
+    static func decodedSize(_ source: URL) -> Int64? {
+        guard let decoded = try? self.readableURL(source),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: decoded.path),
+              let size = attributes[.size] as? NSNumber else { return nil }
+        return size.int64Value
+    }
+
+    /// A paused child retains the decoder state between refreshes. After relaunch its saved
+    /// prefix is replayed in budgeted slices before new bytes are appended.
+    static func prepare(_ source: URL, budget: CostUsageScanner.CodexScanBudget?) throws -> Bool {
+        guard self.isCompressed(source) else { return true }
+        try self.context?.checkCancellation?()
+        guard self.shouldRead(source) else { return false }
+        let snapshot = try Snapshot(source: source)
+        if self.isRegularFile(snapshot.destination) { return true }
+        let budget = budget ?? CostUsageScanner.CodexScanBudget(
+            maxFileBytes: 256 * 1024 * 1024, maxBytesPerRefresh: 512 * 1024 * 1024, maxDuration: 2)
+        let allowance: Int64
+        switch budget.admit(workBytes: Int64.max, tracksPartialFile: false) {
+        case let .allow(bytes): allowance = bytes
+        case .deferBudget: return false
+        }
+        var consumed: Int64 = 0
+        var completed = false
+        defer {
+            budget.complete(admittedWorkBytes: allowance, actualWorkBytes: consumed)
+            if !completed { budget.recordPartialFile() }
+        }
+        guard allowance > 0, self.registry.lock.try() else { return false }
+        defer { self.registry.lock.unlock() }
+        let key = snapshot.directory.path
+        if self.registry.sessions[key]?.snapshot.destination != snapshot.destination {
+            self.registry.sessions.removeValue(forKey: key)
+        }
+        if self.registry.sessions[key] == nil {
+            try self.createSnapshotDirectory(snapshot)
+            guard let session = try DecodeSession(snapshot: snapshot) else { return false }
+            self.registry.sessions[key] = session
+        }
+        guard let session = self.registry.sessions[key] else { return false }
+        do {
+            let complete = try session.advance(allowance: allowance, budget: budget, consumed: &consumed)
+            if complete {
+                guard try Snapshot(source: source).destination == snapshot.destination else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                try session.output.close()
+                try FileManager.default.moveItem(at: snapshot.partial, to: snapshot.destination)
+                self.registry.sessions.removeValue(forKey: key)
+                completed = true
+                return true
+            }
+            session.lease = UUID()
+            let lease = session.lease
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 60) {
+                self.registry.lock.withLock {
+                    if self.registry.sessions[key]?.lease == lease {
+                        self.registry.sessions.removeValue(forKey: key)
+                    }
+                }
+            }
+            return false
+        } catch {
+            self.registry.sessions.removeValue(forKey: key)
+            try? FileManager.default.removeItem(at: snapshot.partial)
+            throw error
+        }
+    }
+
+    static func isRegularFile(_ url: URL) -> Bool {
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         return values?.isRegularFile == true && values?.isSymbolicLink != true
     }
 
-    private static func fingerprint(_ source: URL) throws -> String {
-        let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
-        guard let size = attributes[.size] as? NSNumber,
-              let modified = attributes[.modificationDate] as? Date,
-              let inode = attributes[.systemFileNumber] as? NSNumber
-        else { throw CocoaError(.fileReadUnknown) }
-        return "\(inode)|\(size)|\(modified.timeIntervalSince1970.bitPattern)"
+    static func digest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
+
+    final class Registry: @unchecked Sendable {
+        let lock = NSLock()
+        var sessions: [String: DecodeSession] = [:]
+
+        init() {
+            atexit {
+                // A short-lived CLI must not leave suspended decoder children behind.
+                CostUsageCodexZstd.registry.lock.withLock {
+                    CostUsageCodexZstd.registry.sessions.removeAll()
+                }
+            }
+        }
+    }
+
+    static let registry = Registry()
 }

@@ -323,7 +323,7 @@ enum CostUsageJsonl {
         onLine: (Line) -> Void) throws -> ScanProgress
     {
         let readableURL = try CostUsageCodexZstd.readableURL(fileURL)
-        let handle = try FileHandle(forReadingFrom: readableURL)
+        let handle = try CostUsageCodexZstd.openReadableFile(fileURL)
         defer { try? handle.close() }
 
         let startOffset = resumeState?.offset ?? max(0, offset)

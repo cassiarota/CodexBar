@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import CodexBarCore
 
+@Suite(.serialized)
 struct CostUsageCodexZstdTests {
     @Test
     func `compressed active and archived rollouts match plain history across refreshes`() throws {
@@ -85,6 +86,7 @@ struct CostUsageCodexZstdTests {
         let source = env.root.appendingPathComponent("session.jsonl.zst")
         try self.archive.write(to: source)
         try self.withContext(env) {
+            #expect(try CostUsageCodexZstd.prepare(source, budget: nil))
             let decoded = try CostUsageCodexZstd.readableURL(source)
             let decodedLines = try String(contentsOf: decoded, encoding: .utf8).split(separator: "\n")
             let expectedLines = self.contents.split(separator: "\n")
@@ -99,9 +101,12 @@ struct CostUsageCodexZstdTests {
             let attributes = try FileManager.default.attributesOfItem(atPath: decoded.path)
             #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
             try self.replacementArchive.write(to: source, options: .atomic)
+            #expect(try CostUsageCodexZstd.prepare(source, budget: nil))
             let replacement = try CostUsageCodexZstd.readableURL(source)
             #expect(replacement != decoded)
             #expect(try Data(contentsOf: replacement) != Data(contentsOf: decoded))
+            CostUsageCodexZstd.pruneCache()
+            #expect(!FileManager.default.fileExists(atPath: decoded.path))
         }
     }
 
@@ -112,6 +117,7 @@ struct CostUsageCodexZstdTests {
         let source = env.root.appendingPathComponent("session.jsonl.zst")
         try self.archive.write(to: source)
         try self.withContext(env) {
+            #expect(try CostUsageCodexZstd.prepare(source, budget: nil))
             var offset: Int64 = 0
             var resume: CostUsageJsonl.ResumeState?
             var lines: [Data] = []
@@ -161,18 +167,18 @@ struct CostUsageCodexZstdTests {
                 URL(fileURLWithPath: "/codexbar-test/missing-zstd"))
             {
                 #expect(throws: SubprocessRunnerError.self) {
-                    _ = try CostUsageCodexZstd.readableURL(source)
+                    _ = try CostUsageCodexZstd.prepare(source, budget: nil)
                 }
             }
         }
         #expect(try Data(contentsOf: source) == self.archive)
     }
 
-    private func day() throws -> Date {
+    func day() throws -> Date {
         try #require(ISO8601DateFormatter().date(from: "2025-12-20T12:00:00Z"))
     }
 
-    private func options(_ env: CostUsageTestEnvironment) -> CostUsageScanner.Options {
+    func options(_ env: CostUsageTestEnvironment) -> CostUsageScanner.Options {
         var options = CostUsageScanner.Options(codexSessionsRoot: env.codexSessionsRoot, cacheRoot: env.cacheRoot)
         options.calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         options.refreshMinIntervalSeconds = 0
@@ -180,18 +186,18 @@ struct CostUsageCodexZstdTests {
         return options
     }
 
-    private func report(day: Date, options: CostUsageScanner.Options) -> CostUsageDailyReport {
+    func report(day: Date, options: CostUsageScanner.Options) -> CostUsageDailyReport {
         CostUsageScanner.loadDailyReport(provider: .codex, since: day, until: day, now: day, options: options)
     }
 
-    private func withContext<T>(_ env: CostUsageTestEnvironment, operation: () throws -> T) rethrows -> T {
+    func withContext<T>(_ env: CostUsageTestEnvironment, operation: () throws -> T) rethrows -> T {
         try CostUsageCodexZstd.$context.withValue(.init(
             cacheRoot: env.cacheRoot,
             roots: [env.codexSessionsRoot, env.codexArchivedSessionsRoot],
             checkCancellation: nil), operation: operation)
     }
 
-    private var contents: String {
+    var contents: String {
         [
             #"{"timestamp":"2025-12-20T12:00:00Z","type":"session_meta","payload":{"id":"compressed-session","# +
                 #""cwd":"/workspace/project"}}"#,
@@ -203,7 +209,7 @@ struct CostUsageCodexZstdTests {
     }
 
     /// Synthetic fixtures only; no account data or captured transcripts.
-    private var archive: Data {
+    var archive: Data {
         Data(base64Encoded: [
             "KLUv/QRY5QYA8g4sH2BnqwMGoaG/eENpMlTTr8IVKA5BF6eWNLTKiiDHAAaEGGPMPCedTSJlvOMtL01OK3uTCaCaErDFbjLzpHMr",
             "8KmxWFHI6u0v6Tvwjpv3U5app4dtg53qpwZ6DEVD4+mItnV9oP2WqZcoTYjxzbRgE1hQtiAfkkUUnt4Q7OZFU2ZNoFv29HZ8SW9",

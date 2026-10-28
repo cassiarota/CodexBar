@@ -408,8 +408,10 @@ unavailable (`costUSD: null`). This opt-in CLI mode does not change ordinary cos
       Decoded files stay in CodexBar's private cost cache; source transcripts are not modified. A plain sibling
       takes precedence, and an active-session copy takes precedence over its matching archived copy.
       Missing decoders or damaged archives leave the scan incomplete rather than verifying zero usage.
-      Decoding streams to disk once per source generation (with a 30-second timeout); subsequent JSONL parsing
-      keeps its existing decoded-byte budgets, resume offsets, and token anchors.
+      Decompression and JSONL parsing share the refresh's byte and time budgets. Paused decoders continue on
+      later refreshes; after relaunch, saved prefixes are replayed under the same budget. Metadata queries never
+      start decompression. Obsolete decoded generations are retired incrementally, including after a source is
+      deleted or a plain sibling takes precedence; concurrent readers retain their generation until closed.
   - Supported pi-compatible sessions:
     - `~/.pi/agent/sessions/**/*.jsonl`
     - `~/.omp/agent/sessions/**/*.jsonl`
