@@ -116,12 +116,28 @@ extension CostUsageCodexZstdTests {
         }
         func progressDetails() -> String {
             let cached = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
-            let files = cached.files.values.map {
-                "size=\($0.size),parsed=\($0.parsedBytes ?? -1),complete=\($0.codexScanComplete == true)"
+            let files = cached.files.map { path, usage in
+                "zstd=\(CostUsageCodexZstd.isCompressed(URL(fileURLWithPath: path))),"
+                    + "size=\(usage.size),parsed=\(usage.parsedBytes ?? -1),complete=\(usage.codexScanComplete == true)"
             }.joined(separator: ";")
+            let prepared = self.withContext(env) {
+                [
+                    plain.appendingPathExtension("zst"),
+                    env.codexArchivedSessionsRoot
+                        .appendingPathComponent(plain.lastPathComponent + ".zst"),
+                ].compactMap { source -> String? in
+                    guard let snapshot = try? CostUsageCodexZstd.Snapshot(source: source) else { return nil }
+                    let partial = (try? FileManager.default.attributesOfItem(atPath: snapshot.partial.path)[.size]
+                        as? NSNumber)?.int64Value ?? -1
+                    let session = CostUsageCodexZstd.registry.lock.withLock {
+                        CostUsageCodexZstd.registry.sessions[snapshot.directory.path] != nil
+                    }
+                    return "ready=\(CostUsageCodexZstd.decodedSize(source) ?? -1),partial=\(partial),session=\(session)"
+                }.joined(separator: ";")
+            }
             return "files:[\(files)],queue:\(cached.codexActiveLookbackState?.pendingFilePaths.count ?? -1),"
                 + "head:\(cached.codexSessionDiscovery?.headScan?.offset ?? -1),"
-                + "discovery:\(cached.codexSessionDiscovery?.isComplete == true)"
+                + "discovery:\(cached.codexSessionDiscovery?.isComplete == true),decode:[\(prepared)]"
         }
         queuePagedRefresh()
         var completed = false
