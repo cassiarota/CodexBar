@@ -1332,7 +1332,9 @@ enum CostUsageScanner {
 
         private func cachedFileURL(for sessionId: String) -> URL? {
             guard let path = self.discovery.filePathBySessionId[sessionId] else { return nil }
-            guard FileManager.default.fileExists(atPath: path) else {
+            guard FileManager.default.fileExists(atPath: path),
+                  CostUsageCodexZstd.shouldRead(URL(fileURLWithPath: path))
+            else {
                 self.discovery.filePathBySessionId.removeValue(forKey: sessionId)
                 return nil
             }
@@ -1341,7 +1343,8 @@ enum CostUsageScanner {
 
         private func cachedSessionFiles() -> [String: URL] {
             self.discovery.filePathBySessionId.reduce(into: [:]) { result, entry in
-                guard FileManager.default.fileExists(atPath: entry.value) else { return }
+                guard FileManager.default.fileExists(atPath: entry.value),
+                      CostUsageCodexZstd.shouldRead(URL(fileURLWithPath: entry.value)) else { return }
                 result[entry.key] = URL(fileURLWithPath: entry.value)
             }
         }
@@ -1376,6 +1379,10 @@ enum CostUsageScanner {
         private func scanNextFileHead() throws -> Bool {
             let path = self.discovery.filePaths[self.discovery.nextFileIndex]
             let fileURL = URL(fileURLWithPath: path)
+            guard CostUsageCodexZstd.shouldRead(fileURL) else {
+                self.advancePastHead(path: path, stamp: nil)
+                return true
+            }
             let metadata = CostUsageScanner.codexFileMetadata(fileURL: fileURL)
             guard metadata.fileId != nil else {
                 if let scanBudget = self.scanBudget {
@@ -5496,6 +5503,10 @@ enum CostUsageScanner {
     {
         try context.checkCancellation?()
         let metadata = Self.codexFileMetadata(fileURL: fileURL)
+        guard CostUsageCodexZstd.shouldRead(fileURL) else {
+            Self.dropCachedCodexFile(path: metadata.path, cached: cache.files[metadata.path], cache: &cache)
+            return .processed
+        }
         if context.sourceRowRecoveryPathKeys.contains(Self.codexPathKey(fileURL))
             || cache.files[metadata.path]?.codexPendingSourcePricing != nil
         {
@@ -6014,9 +6025,6 @@ enum CostUsageScanner {
         let loadedCache = Self.loadCodexCache(options: options, range: range)
         defer { loadedCache.release() }
         var cache = loadedCache.cache
-        for path in cache.files.keys where !CostUsageCodexZstd.shouldRead(URL(fileURLWithPath: path)) {
-            Self.dropCachedCodexFile(path: path, cached: cache.files[path], cache: &cache)
-        }
         let history = CodexScanHistoryHydrator(load: loadedCache)
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
         // Timed warm refreshes can become catch-up work too. Keep their actual discovery range
@@ -6076,6 +6084,9 @@ enum CostUsageScanner {
         if plan.shouldRefresh {
             let range = scanRange
             try checkCancellation?()
+            for path in cache.files.keys where !CostUsageCodexZstd.shouldRead(URL(fileURLWithPath: path)) {
+                Self.dropCachedCodexFile(path: path, cached: cache.files[path], cache: &cache)
+            }
             if options.forceRescan {
                 cache = CostUsageCache()
                 history.reset()

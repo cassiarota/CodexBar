@@ -34,6 +34,35 @@ struct CostUsageCodexZstdTests {
     }
 
     @Test
+    func `a newly preferred plain copy does not clear a debounced cached report`() throws {
+        let env = try CostUsageTestEnvironment()
+        defer { env.cleanup() }
+        let day = try self.day()
+        let compressed = env.codexArchivedSessionsRoot.appendingPathComponent("rollout-2025-12-20-session.jsonl.zst")
+        try self.archive.write(to: compressed)
+        var options = self.options(env)
+        let original = self.report(day: day, options: options)
+        #expect(original.data.first?.inputTokens == 1000)
+
+        let plain = compressed.deletingPathExtension()
+        let updated = self.contents
+            .replacingOccurrences(of: "\"input_tokens\":1000", with: "\"input_tokens\":2000")
+            .replacingOccurrences(of: "\"cached_input_tokens\":400", with: "\"cached_input_tokens\":800")
+            .replacingOccurrences(of: "\"output_tokens\":100", with: "\"output_tokens\":200")
+            .replacingOccurrences(of: "\"total_tokens\":1100", with: "\"total_tokens\":2200")
+        try updated.write(to: plain, atomically: true, encoding: .utf8)
+        options.refreshMinIntervalSeconds = 3600
+        let debounced = self.report(day: day, options: options)
+        #expect(debounced.summary?.totalTokens == original.summary?.totalTokens)
+
+        options.refreshMinIntervalSeconds = 0
+        let refreshed = self.report(day: day, options: options)
+        #expect(refreshed.data.first?.inputTokens == 2000)
+        #expect(refreshed.data.first?.outputTokens == 200)
+        #expect(CostUsageStoreAccess.read(cacheRoot: env.cacheRoot).files[compressed.path] == nil)
+    }
+
+    @Test
     func `active copy wins over archived copies in either encoding`() throws {
         let env = try CostUsageTestEnvironment()
         defer { env.cleanup() }
