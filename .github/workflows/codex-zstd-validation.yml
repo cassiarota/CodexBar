@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: cdfe009ecc970287124866b32ca766672587c7c4
+  FIX_COMMIT: f5347cedd74239d0ca791933448037ca26b606e2
 
 jobs:
   check:
@@ -105,3 +105,80 @@ jobs:
           python3 .github/pr-proof/codex-zstd-history/run-proof.py \
             --base "$RUNNER_TEMP/codexbar-stable/codexbar" \
             --head "$proof_bin/CodexBarCLI" --large
+
+  regression-before:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.FIX_COMMIT }}
+          persist-credentials: false
+      - name: Select Xcode and fetch the pre-review implementation
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer' >> "$GITHUB_ENV"
+          git fetch --depth=1 origin a186d28262bfa8f72c1c30d72113cc999f19b200
+          mkdir -p "$RUNNER_TEMP/codex-zstd-baseline"
+          git worktree add --detach "$RUNNER_TEMP/codex-zstd-baseline/CodexBar" a186d28262bfa8f72c1c30d72113cc999f19b200
+      - name: Reproduce double counting with the same paged transition regression
+        run: |
+          source ./Scripts/test_environment.sh
+          export CODEXBAR_DISABLE_KEYCHAIN_ACCESS=1
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          source = Path.cwd()
+          root = Path(os.environ["RUNNER_TEMP"]) / "codex-zstd-baseline"
+          harness = root / "TestHarness"
+          tests = harness / "Tests"
+          tests.mkdir(parents=True)
+          main = (source / "Tests/CodexBarTests/CostUsageCodexZstdTests.swift").read_text()
+          budget = (source / "Tests/CodexBarTests/CostUsageCodexZstdTests+Budgets.swift").read_text()
+          start = budget.index('    @Test\n    func `paged compression transitions')
+          method = budget[start:budget.index('\n    @Test', start + 10)]
+          helpers = []
+          for first, last in [
+              ('    func day(', '\n    func options('),
+              ('    func options(', '\n    func report('),
+              ('    func report(', '\n    func withContext'),
+              ('    var contents:', '\n    var archive:'),
+              ('    var archive:', '\n    private var replacementArchive:'),
+          ]:
+              begin = main.index(first)
+              helpers.append(main[begin:main.index(last, begin)])
+          header = 'import Foundation\nimport Testing\n@testable import CodexBarCore\n'
+          (tests / 'PagedTransition.swift').write_text(
+              header + 'struct PagedTransitionRegressionTests {\n' + method + '\n'.join(helpers) + '\n}\n')
+          environment = (source / 'Tests/CodexBarTests/CostUsageScannerTests.swift').read_text()
+          (tests / 'Environment.swift').write_text(
+              header + '#if canImport(Darwin)\nimport Darwin\n#else\nimport Glibc\n#endif\n' +
+              environment[environment.index('struct CostUsageTestEnvironment {'):])
+          for name in ['CostUsageTestFactory.swift', 'CostUsageClaudeCacheTestSupport.swift', 'LockIsolated.swift']:
+              shutil.copyfile(source / 'Tests/CodexBarTests' / name, tests / name)
+          manifest = '''// swift-tools-version: 6.2
+          import PackageDescription
+          let package = Package(name: "PagedTransitionRegression", platforms: [.macOS(.v14)],
+              dependencies: [.package(path: SOURCE)],
+              targets: [.testTarget(name: "PagedTransitionRegressionTests",
+                  dependencies: [.product(name: "CodexBarCore", package: "CodexBar")], path: "Tests")])
+          '''.replace('SOURCE', json.dumps(str(root / 'CodexBar')))
+          (harness / 'Package.swift').write_text(manifest)
+          PYTHON
+          set +e
+          swift test --package-path "$RUNNER_TEMP/codex-zstd-baseline/TestHarness" --parallel > "$RUNNER_TEMP/zstd-before.log" 2>&1
+          proof_before_status=$?
+          set -e
+          test "$proof_before_status" -ne 0
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          log = (Path(os.environ['RUNNER_TEMP']) / 'zstd-before.log').read_text()
+          failures = [line for line in log.splitlines() if 'Expectation failed' in line]
+          assert any('2200' in line and '1100' in line for line in failures), log[-12000:]
+          print('CONFIRMED: the pre-review implementation counts 2,200 tokens for a 1,100-token session during paged discovery.')
+          print('\n'.join(failures[:3]))
+          PYTHON
