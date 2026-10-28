@@ -955,6 +955,7 @@ extension CostUsageStoreTests {
 
 extension CostUsageStoreTests {
     private static let testedPredecessorParserHashes = [
+        "e5909f60274b2c47", // Released in 0.82.0; native history and checkpoints must survive adoption.
         "4e1358d00a4a47b5", // Current main before the optional local-history source.
         "54a95e8fe7bd6ee9", // Selected-session inspection before checkpoint validation.
         "455876ace937d42a", // Current main before selected-session detail reads.
@@ -1032,7 +1033,6 @@ extension CostUsageStoreTests {
             "2d17f4981b78d07f",
             "3c984b655688593f",
             "5f8507161b23757c",
-            "e5909f60274b2c47",
         ]))
         let predecessorVersion = CostUsageStore.combinedSchemaVersion(
             base: CostUsageStore.baseSchemaVersion,
@@ -1092,7 +1092,7 @@ extension CostUsageStoreTests {
         let current = CostUsageStore(cacheRoot: fixture.root)
         let after = await current.readSnapshot()
         var expected = before
-        if ["ed735dc27ffa70d9", "99d920977063318a", "865cef15206ea5c0", "d35c9fb00bee059b"]
+        if ["ed735dc27ffa70d9", "99d920977063318a", "865cef15206ea5c0", "d35c9fb00bee059b", "e5909f60274b2c47"]
             .contains(predecessorHash)
         {
             // These reports predate corrected pricing and coverage; native history still survives intact.
