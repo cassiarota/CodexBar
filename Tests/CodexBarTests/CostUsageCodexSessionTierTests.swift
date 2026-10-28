@@ -248,10 +248,23 @@ struct CostUsageCodexSessionTierTests {
         }
         let report = CostUsageScanner.loadDailyReport(
             provider: .codex, since: day, until: day, now: day.addingTimeInterval(20), options: options)
-        let cache = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+        var cache = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
         #expect(cache.files[file.path]?.codexRows?.map(\.pricingMode) == ["standard", "priority", "standard"])
         #expect(report.summary?.totalTokens == 3300)
         #expect(try abs(#require(report.summary?.totalCostUSD) - 0.00592) < 1e-12)
+
+        // Older parsers pinned each row to the tier observed at task_started.
+        cache.files[file.path]?.codexParserRevision = CostUsageFileUsage.currentCodexParserRevision - 1
+        for (index, mode) in ["standard", "standard", "priority"].enumerated() {
+            cache.files[file.path]?.codexRows?[index].pricingMode = mode
+        }
+        _ = CostUsageStoreAccess.replace(cacheRoot: env.cacheRoot, cache: cache)
+        let migrated = CostUsageScanner.loadDailyReport(
+            provider: .codex, since: day, until: day, now: day.addingTimeInterval(40), options: options)
+        let restored = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+        #expect(restored.files[file.path]?.codexRows?.map(\.pricingMode) == ["standard", "priority", "standard"])
+        #expect(migrated.summary?.totalTokens == 3300)
+        #expect(try abs(#require(migrated.summary?.totalCostUSD) - 0.00592) < 1e-12)
     }
 
     private static func cost(serviceTier: String, usageKind: String) throws -> Double {

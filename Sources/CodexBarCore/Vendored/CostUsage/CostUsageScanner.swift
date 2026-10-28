@@ -4407,6 +4407,14 @@ enum CostUsageScanner {
             else { return index }
             // A typed mirror changes request identity, not the matching row's saved billing evidence.
             let pricing = retainedPricing.flatMap { $0.model == normalizedModel ? $0 : nil }
+            let isPriority = requestLedger.priorityTurnIDs?.contains(turnID ?? "") == true
+            let observedMode: String? = if isPriority {
+                "priority"
+            } else if requestLedger.threadPriority != nil, turnID == currentTurnID {
+                "standard"
+            } else {
+                nil
+            }
             rows.append(CodexUsageRow(
                 day: day,
                 model: normalizedModel,
@@ -4421,8 +4429,7 @@ enum CostUsageScanner {
                 knownCostNanos: pricing?.knownCostNanos,
                 unpricedTokens: pricing?.unpricedTokens,
                 pricingModel: pricing?.pricingModel,
-                pricingMode: pricing?.pricingMode
-                    ?? (requestLedger.priorityTurnIDs?.contains(turnID ?? "") == true ? "priority" : nil),
+                pricingMode: pricing?.pricingMode ?? observedMode,
                 responseID: responseID,
                 requestMirrorKeys: mirrorKeys))
             rowSourceEndOffsets[index] = endOffset

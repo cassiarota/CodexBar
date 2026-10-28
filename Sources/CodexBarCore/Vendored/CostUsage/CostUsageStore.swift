@@ -122,6 +122,7 @@ actor CostUsageStore {
         parserHash: CodexParserHash.value)
     static let cacheGeneration = "sqlite:\(CostUsageStore.schemaVersion)"
     static let compatiblePredecessorParserHashes: Set<String> = [
+        "e5909f60274b2c47", // Revision 14 reparses resumed-turn tiers while preserving native history.
         "4e1358d00a4a47b5", // Optional source ownership preserves existing native Codex rows and checkpoints.
         "54a95e8fe7bd6ee9", // Validating inspection checkpoints leaves persisted rows and scan progress unchanged.
         "455876ace937d42a", // Selected-session detail reads leave current-main native rows and checkpoints unchanged.
@@ -193,6 +194,7 @@ actor CostUsageStore {
         "5f8507161b23757c", // 0.54.2 tokscale parity + priority evidence; persisted row shape unchanged.
     ]
     static let incompatibleRetainedReportPredecessorParserHashes: Set<String> = [
+        "e5909f60274b2c47",
         "865cef15206ea5c0",
         "d35c9fb00bee059b",
         "99d920977063318a",
