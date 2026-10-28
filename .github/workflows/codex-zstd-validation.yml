@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: 53fd81e0d9ff6e84ccaf2d3df223f57d1a40b228
+  FIX_COMMIT: bf0e62e87d61c0ca2ef1b235d26bc22996db1bcf
 
 jobs:
   check:
@@ -42,6 +42,8 @@ jobs:
           swift --version
           command -v zstd || brew install zstd
       - name: Focused core regression tests
+        id: core
+        continue-on-error: true
         run: |
           source ./Scripts/test_environment.sh
           export CODEXBAR_DISABLE_KEYCHAIN_ACCESS=1
@@ -105,6 +107,9 @@ jobs:
           python3 .github/pr-proof/codex-zstd-history/run-proof.py \
             --base "$RUNNER_TEMP/codexbar-stable/codexbar" \
             --head "$proof_bin/CodexBarCLI" --large
+      - name: Require focused regressions to pass
+        if: steps.core.outcome != 'success'
+        run: exit 1
 
   regression-before:
     runs-on: xcode-27
@@ -129,6 +134,7 @@ jobs:
           import json
           import os
           from pathlib import Path
+          import re
           import shutil
 
           source = Path.cwd()
@@ -140,6 +146,8 @@ jobs:
           budget = (source / "Tests/CodexBarTests/CostUsageCodexZstdTests+Budgets.swift").read_text()
           start = budget.index('    @Test\n    func `paged compression transitions')
           method = budget[start:budget.index('\n    @Test', start + 10)]
+          method = re.sub(r'(?ms)^        func progressDetails\(\) -> String \{.*?^        \}\n', '', method)
+          method = method.replace(r'#expect(completed, "\(progressDetails())")', '#expect(completed)')
           helpers = []
           for first, last in [
               ('    func day(', '\n    func options('),
