@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import shutil
 import subprocess
 import tempfile
 
@@ -146,7 +147,9 @@ def main():
         compress(plain)
         proof["plainToCompressedTransition"] = converge(args.head, upgrade, 6600)
         archived = upgrade / ".codex/archived_sessions" / (plain.name + ".zst")
-        plain.with_suffix(plain.suffix + ".zst").rename(archived)
+        compressed = plain.with_suffix(plain.suffix + ".zst")
+        shutil.copyfile(compressed, archived)
+        compressed.unlink()
         proof["activeToArchivedTransition"] = converge(args.head, upgrade, 6600)
 
         if args.large:

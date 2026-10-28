@@ -43,30 +43,32 @@ enum CostUsageCodexZstd {
         if self.isCompressed(url), self.isRegularFile(plain) { return false }
         if !self.isCompressed(url), !self.isRegularFile(url),
            self.isRegularFile(url.appendingPathExtension("zst")) { return false }
-        if let roots = self.context?.roots, roots.count == 2 {
-            let archivedPrefix = roots[1].standardizedFileURL.path + "/"
-            let path = plain.standardizedFileURL.path
-            if path.hasPrefix(archivedPrefix) {
-                let relative = String(path.dropFirst(archivedPrefix.count))
-                var candidates = [roots[0].appendingPathComponent(relative)]
-                if !relative.contains("/"),
-                   let day = CostUsageScanner.dayKeyFromFilename(plain.lastPathComponent)
-                {
-                    candidates.append(roots[0]
-                        .appendingPathComponent(day.replacingOccurrences(of: "-", with: "/"))
-                        .appendingPathComponent(plain.lastPathComponent))
-                }
-                if candidates.contains(where: {
-                    self.isRegularFile($0) || self.isRegularFile($0.appendingPathExtension("zst"))
-                }) { return false }
-            }
+        return !self.activeCandidates(for: plain).contains {
+            self.isRegularFile($0) || self.isRegularFile($0.appendingPathExtension("zst"))
         }
-        return true
+    }
+
+    private static func activeCandidates(for plain: URL) -> [URL] {
+        guard let roots = self.context?.roots, roots.count == 2 else { return [] }
+        let archivedPrefix = roots[1].standardizedFileURL.path + "/"
+        let path = plain.standardizedFileURL.path
+        guard path.hasPrefix(archivedPrefix) else { return [] }
+        let relative = String(path.dropFirst(archivedPrefix.count))
+        var candidates = [roots[0].appendingPathComponent(relative)]
+        if !relative.contains("/"), let day = CostUsageScanner.dayKeyFromFilename(plain.lastPathComponent) {
+            candidates.append(roots[0]
+                .appendingPathComponent(day.replacingOccurrences(of: "-", with: "/"))
+                .appendingPathComponent(plain.lastPathComponent))
+        }
+        return candidates
     }
 
     static func supersededPaths(for url: URL) -> [String] {
         let plain = self.isCompressed(url) ? url.deletingPathExtension() : url
         var candidates = [plain, plain.appendingPathExtension("zst")]
+        for active in self.activeCandidates(for: plain) {
+            candidates.append(contentsOf: [active, active.appendingPathExtension("zst")])
+        }
         if let roots = self.context?.roots, roots.count == 2 {
             let activePrefix = roots[0].standardizedFileURL.path + "/"
             let path = plain.standardizedFileURL.path

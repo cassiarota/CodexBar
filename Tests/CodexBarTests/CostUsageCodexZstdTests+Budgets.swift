@@ -14,10 +14,12 @@ extension CostUsageCodexZstdTests {
             let budget = CostUsageScanner.CodexScanBudget(
                 maxFileBytes: 1024, maxBytesPerRefresh: 1024, maxDuration: 1, now: { clock.value })
             clock.setValue(clock.value.advanced(by: .seconds(2)))
-            #expect(try !CostUsageCodexZstd.prepare(source, budget: budget))
+            let completed = try CostUsageCodexZstd.prepare(source, budget: budget)
+            #expect(!completed)
             #expect(budget.deferredByTimeBudgetFileCount > 0)
             #expect(CostUsageCodexZstd.decodedSize(source) == nil)
-            #expect(try CostUsageCodexZstd.prepare(source, budget: nil))
+            let resumed = try CostUsageCodexZstd.prepare(source, budget: nil)
+            #expect(resumed)
         }
     }
 
@@ -114,6 +116,25 @@ extension CostUsageCodexZstdTests {
             if cache.codexScanCatchUpPending != true {
                 #expect(report.summary?.totalTokens == 1100)
                 #expect(cache.files[plain.path] == nil)
+                completed = true
+                break
+            }
+        }
+        #expect(completed)
+
+        let compressed = plain.appendingPathExtension("zst")
+        let archived = env.codexArchivedSessionsRoot.appendingPathComponent(compressed.lastPathComponent)
+        // Copy-and-delete also changes the inode, so physical-file aliasing cannot reconcile it.
+        try FileManager.default.copyItem(at: compressed, to: archived)
+        try FileManager.default.removeItem(at: compressed)
+        completed = false
+        for _ in 0..<200 {
+            let report = self.report(day: day, options: options)
+            #expect((report.summary?.totalTokens ?? 0) <= 1100)
+            let cache = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+            if cache.codexScanCatchUpPending != true {
+                #expect(report.summary?.totalTokens == 1100)
+                #expect(cache.files[compressed.path] == nil)
                 completed = true
                 break
             }
