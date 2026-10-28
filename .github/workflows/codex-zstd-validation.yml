@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FIX_COMMIT: f5347cedd74239d0ca791933448037ca26b606e2
+  FIX_COMMIT: 53fd81e0d9ff6e84ccaf2d3df223f57d1a40b228
 
 jobs:
   check:
@@ -176,9 +176,11 @@ jobs:
           python3 - <<'PYTHON'
           import os
           from pathlib import Path
+          import re
           log = (Path(os.environ['RUNNER_TEMP']) / 'zstd-before.log').read_text()
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', log)
           failures = [line for line in log.splitlines() if 'Expectation failed' in line]
-          assert any('2200' in line and '1100' in line for line in failures), log[-12000:]
+          assert any('1100' in line for line in failures) and '→ 2200' in log, log[-12000:]
           print('CONFIRMED: the pre-review implementation counts 2,200 tokens for a 1,100-token session during paged discovery.')
-          print('\n'.join(failures[:3]))
+          print('\n'.join(line for line in log.splitlines() if 'Expectation failed' in line or '→ 2200' in line))
           PYTHON
