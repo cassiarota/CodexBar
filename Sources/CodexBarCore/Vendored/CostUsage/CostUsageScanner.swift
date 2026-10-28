@@ -402,6 +402,7 @@ enum CostUsageScanner {
         /// Thread settings persist until replaced, including across resumed turns.
         var threadPriority: Bool?
         var priorityTurnIDs: Set<String>?
+        var resumedTurnPriority: Bool?
         var sessionID: String?
         var pendingLedgerMirrors: Set<String>?
         var pendingLedgerResponseID: String?
@@ -4410,7 +4411,9 @@ enum CostUsageScanner {
             let isPriority = requestLedger.priorityTurnIDs?.contains(turnID ?? "") == true
             let observedMode: String? = if isPriority {
                 "priority"
-            } else if requestLedger.threadPriority != nil, turnID == currentTurnID {
+            } else if requestLedger.resumedTurnPriority == false,
+                      turnID == (currentTurnID ?? requestLedger.activeTurnID)
+            {
                 "standard"
             } else {
                 nil
@@ -4911,7 +4914,11 @@ enum CostUsageScanner {
                 if let turnID = metadata.turnID {
                     requestLedger.activeTurnID = turnID
                     // Resuming a turn can refresh its context without another task_started event.
-                    if requestLedger.threadPriority != nil, currentTurnID == nil || currentTurnID == turnID {
+                    if let priority = requestLedger.threadPriority, currentTurnID == nil || currentTurnID == turnID {
+                        // An unchanged default cannot disprove saved request-level Priority evidence.
+                        if priority != (requestLedger.priorityTurnIDs?.contains(turnID) == true) {
+                            requestLedger.resumedTurnPriority = priority
+                        }
                         observeThreadPriority(for: turnID)
                     }
                 }
@@ -4932,6 +4939,7 @@ enum CostUsageScanner {
             case let .taskStarted(turnID):
                 requestLedger.clearPendingMirrors()
                 currentTurnID = turnID
+                requestLedger.resumedTurnPriority = nil
                 observeThreadPriority(for: turnID)
                 if let turnID { requestLedger.turnPerformance?[turnID]?.completion = nil }
             case let .taskCompleted(completion):

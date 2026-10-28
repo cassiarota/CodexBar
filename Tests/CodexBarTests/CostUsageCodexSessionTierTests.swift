@@ -197,8 +197,8 @@ struct CostUsageCodexSessionTierTests {
         #expect(parsed.rows.allSatisfy { $0.pricingMode == "priority" })
     }
 
-    @Test(arguments: [false, true])
-    func `resumed turn contexts refresh the tier without repricing earlier requests`(incremental: Bool) throws {
+    @Test(arguments: [0, 6, 10])
+    func `resumed turn contexts refresh the tier without repricing earlier requests`(prefixCount: Int) throws {
         let env = try CostUsageTestEnvironment()
         defer { env.cleanup() }
         let day = try env.makeLocalNoon(year: 2026, month: 10, day: 1)
@@ -233,17 +233,17 @@ struct CostUsageCodexSessionTierTests {
         let file = try env.writeCodexSessionFile(
             day: day,
             filename: "resumed-tier.jsonl",
-            contents: env.jsonl(incremental ? Array(records.prefix(6)) : records))
+            contents: env.jsonl(prefixCount > 0 ? Array(records.prefix(prefixCount)) : records))
         var options = CostUsageScanner.Options(
             codexSessionsRoot: env.codexSessionsRoot,
             cacheRoot: env.cacheRoot,
             codexTraceDatabaseURL: env.root.appendingPathComponent("missing-traces.sqlite"))
         options.refreshMinIntervalSeconds = 0
-        if incremental {
+        if prefixCount > 0 {
             _ = CostUsageScanner.loadDailyReport(provider: .codex, since: day, until: day, now: day, options: options)
             let handle = try FileHandle(forWritingTo: file)
             try handle.seekToEnd()
-            try handle.write(contentsOf: Data(env.jsonl(Array(records.dropFirst(6))).utf8))
+            try handle.write(contentsOf: Data(env.jsonl(Array(records.dropFirst(prefixCount))).utf8))
             try handle.close()
         }
         let report = CostUsageScanner.loadDailyReport(
