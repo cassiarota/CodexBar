@@ -122,12 +122,13 @@ struct CostUsageCodexSessionTierTests {
             codexTraceDatabaseURL: env.root.appendingPathComponent("missing-traces.sqlite"))
         options.refreshMinIntervalSeconds = 0
         _ = CostUsageScanner.loadDailyReport(provider: .codex, since: day, until: day, now: day, options: options)
-        let stored = CostUsageStore(cacheRoot: env.cacheRoot)
+        let stored = CostUsageStore(cacheRoot: env.cacheRoot, home: env.codexStoreHome)
         let before = try #require(await stored.fetchFile(path: file.path))
         #expect(before.parsedBytes == before.size)
         await stored.closeConnectionForTesting()
         #expect(await stored.fetchFile(path: file.path) == before)
-        let checkpoint = CostUsageStore(cacheRoot: env.cacheRoot).syncLoadCodexCache(calendar: .current)
+        let checkpoint = CostUsageStore(cacheRoot: env.cacheRoot, home: env.codexStoreHome)
+            .syncLoadCodexCache(calendar: .current)
         let tierState = try #require(checkpoint.files[file.path]?.codexRequestLedgerState)
         #expect(tierState.threadPriority == (prefixCount != 7))
         #expect(tierState.priorityTurnIDs == (prefixCount == 2 ? nil : ["priority-turn"]))
@@ -137,7 +138,8 @@ struct CostUsageCodexSessionTierTests {
         try handle.close()
         let resumed = CostUsageScanner.loadDailyReport(
             provider: .codex, since: day, until: day, now: day.addingTimeInterval(1), options: options)
-        let reopened = CostUsageStore(cacheRoot: env.cacheRoot).syncLoadCodexCache(calendar: .current)
+        let reopened = CostUsageStore(cacheRoot: env.cacheRoot, home: env.codexStoreHome)
+            .syncLoadCodexCache(calendar: .current)
         let rows = try #require(reopened.files[file.path]?.codexRows)
         #expect(rows.map(\.pricingMode) == ["priority", "priority", "standard", "standard", "standard"])
         #expect(resumed.summary?.totalTokens == 1_050_000)
@@ -248,7 +250,7 @@ struct CostUsageCodexSessionTierTests {
         }
         let report = CostUsageScanner.loadDailyReport(
             provider: .codex, since: day, until: day, now: day.addingTimeInterval(20), options: options)
-        var cache = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+        var cache = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot, home: env.codexStoreHome)
         #expect(cache.files[file.path]?.codexRows?.map(\.pricingMode) == ["standard", "priority", "standard"])
         #expect(report.summary?.totalTokens == 3300)
         #expect(try abs(#require(report.summary?.totalCostUSD) - 0.00592) < 1e-12)
@@ -258,10 +260,10 @@ struct CostUsageCodexSessionTierTests {
         for (index, mode) in ["standard", "standard", "priority"].enumerated() {
             cache.files[file.path]?.codexRows?[index].pricingMode = mode
         }
-        _ = CostUsageStoreAccess.replace(cacheRoot: env.cacheRoot, cache: cache)
+        _ = CostUsageStoreAccess.replace(cacheRoot: env.cacheRoot, home: env.codexStoreHome, cache: cache)
         let migrated = CostUsageScanner.loadDailyReport(
             provider: .codex, since: day, until: day, now: day.addingTimeInterval(40), options: options)
-        let restored = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot)
+        let restored = CostUsageStoreAccess.read(cacheRoot: env.cacheRoot, home: env.codexStoreHome)
         #expect(restored.files[file.path]?.codexRows?.map(\.pricingMode) == ["standard", "priority", "standard"])
         #expect(migrated.summary?.totalTokens == 3300)
         #expect(try abs(#require(migrated.summary?.totalCostUSD) - 0.00592) < 1e-12)

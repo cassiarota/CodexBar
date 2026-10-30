@@ -160,6 +160,7 @@
 "Individual credits" = "Bireysel krediler";
 "Workspace" = "Çalışma alanı";
 "Credits history" = "Kredi geçmişi";
+"Cursor app session expired — open Cursor to sign in again, or sign in to cursor.com in your browser." = "Cursor uygulama oturumunun süresi doldu — yeniden giriş yapmak için Cursor’ı açın veya tarayıcınızda cursor.com’a giriş yapın.";
 "Cursor login failed" = "Cursor girişi başarısız";
 "Custom" = "Özel";
 "Custom Path" = "Özel yol";
@@ -2763,3 +2764,7 @@
 "Show this Mac's recorded OpenCode usage in Codex history. Off by default; scoped or alternate CODEX_HOME locations always stay excluded." = "Bu Mac’te kaydedilen OpenCode kullanımını Codex geçmişinde gösterir. Varsayılan olarak kapalıdır; kapsamı sınırlandırılmış veya alternatif CODEX_HOME konumları her zaman hariç tutulur.";
 "Auto uses the active saved session, otherwise an API key or browser cookies." = "Otomatik, etkin kayıtlı oturumu kullanır; yoksa bir API anahtarı veya tarayıcı çerezlerini kullanır.";
 "Store multiple Command Code subscription sessions." = "Birden fazla Command Code abonelik oturumunu depolayın.";
+
+/* WorkBuddy reward credits */
+"Rewards" = "Ödüller";
+"Reward expiry" = "Ödüllerin son kullanma tarihi";

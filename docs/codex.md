@@ -375,6 +375,23 @@ there is no `auth.json`. Local cost estimates do not require account identity or
 Managed and profile homes retain their separate history scopes; a home already represented by a visible account
 is not added again as a local source. This does not read the CLI's keyring credentials.
 
+Each Codex home keeps its scan progress, discovery, coverage, and daily totals in the existing shared SQLite store.
+Switching homes does not reset another home's completed history or pending work, and retention only prunes the
+selected home's rows. Existing singleton state is migrated in place to its recorded home (or the default home when
+no root was recorded), retaining file IDs and history without creating per-home database copies.
+Existing OpenCode rows keep the shared writer's scope even when the last native scan used a custom home.
+
+When Codex replaces a previously scanned `X.jsonl` with its sibling `X.jsonl.zst`, CodexBar retains the
+cached usage and coverage for that logical rollout in either `sessions/` or `archived_sessions/`. If both
+forms exist, the plain file wins and its usage is counted once. CodexBar never reads or decompresses
+`.zst` files and does not create a decompressed transcript mirror.
+
+Only usage already parsed while the rollout was plain can be retained. Archives that CodexBar never
+saw as plain files are not counted or backfilled. Retained archived estimates survive parser updates,
+forced rescans, lookback changes, storage-budget enforcement, and switching Codex homes; they keep their
+saved accounting because they can no longer be reparsed. Normal date-retention operations can still expire
+these rows, and removing the archive removes its retained contribution. Clearing the cost cache loses this history.
+
 The static musl Linux CLI reserves an 8 MiB thread stack so scanning non-empty Codex session logs
 does not exhaust musl's smaller default stack. The scanner and cache format stay shared with glibc and macOS.
 
@@ -416,6 +433,10 @@ unavailable (`costUSD: null`). This opt-in CLI mode does not change ordinary cos
     existing priority-request evidence selects that mode. Stored token rows are repriced without a history rebuild.
     Rates follow the [OpenAI model card](https://developers.openai.com/api/docs/models/gpt-6-astra) and
     [pricing table](https://developers.openai.com/api/docs/pricing).
+  - GPT-6.1 Sol Fast estimates use twice the applicable Standard API rates: $4/$20/$0.20 per million
+    input/output/cached-input tokens, with full-request long-context rates above 272K input tokens.
+    Rates follow the [model card](https://developers.openai.com/api/docs/models/gpt-6.1-sol) and
+    [Fast pricing table](https://developers.openai.com/api/docs/pricing?latest-pricing=fast).
   - Valid JSON whitespace between event fields is accepted during initial scans and appended-session refreshes.
     Older cached files are reparsed once through the normal scan budget; compatible stores retain their rows and
     checkpoints until each file is refreshed.
@@ -423,10 +444,13 @@ unavailable (`costUSD: null`). This opt-in CLI mode does not change ordinary cos
     `turn_context` is authoritative for the model bucket.
   - Native session `thread_settings_applied.thread_settings.service_tier` evidence applies to the following
     `task_started` turn and subsequent turns until another settings event replaces it, using the existing published
-    Fast multipliers. The effective thread tier and known Priority turns survive incremental scans and SQLite reopening.
+    Fast multipliers. A resumed `turn_context` refreshes the tier for subsequent requests without changing earlier
+    requests in the same turn. The effective tier survives incremental scans and SQLite reopening. Parser revision 14
+    refreshes older rows through bounded reparsing; compatible stores retain token history and checkpoints while
+    stale retained report totals are discarded.
     Without a known tier, or after an unknown tier is applied, pricing retains the Standard fallback;
     subagents do not inherit a parent tier. Live or saved Priority trace evidence remains authoritative, including
-    after trace pruning. Compatible stores retain history while older parser revisions reparse within the scan budget.
+    after trace pruning.
   - Direct forks preserve the inherited origin of cumulative counters when resolving parent snapshots, including
     intermediate sessions that are empty at the child's fork time. Repeated inherited snapshots contribute no
     new usage; descendants count only their deltas. Ancestry remains a cache dependency, so ancestor changes
